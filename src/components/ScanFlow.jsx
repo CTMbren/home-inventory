@@ -2,14 +2,27 @@ import { Suspense, lazy, useCallback, useState } from 'react'
 import { supabase } from '../supabase'
 import { CATEGORIES, lookupBarcode } from '../lookup'
 import { addStock, adjustStock } from '../useInventory'
-
-// The barcode decoder is the heaviest part of the app; load it only on the Scan tab.
-const Scanner = lazy(() => import('./Scanner'))
+import { barcodeVariants, normalizeBarcode, sameBarcode } from '../barcode'
 import LocationPicker, { lastLocation, rememberLocation } from './LocationPicker'
 import Stepper from './Stepper'
 import ProductThumb from './ProductThumb'
+import PhotoButton from './PhotoButton'
+import LinkExisting from './LinkExisting'
+import { deleteProductPhoto } from '../photos'
 
-const EMPTY = { barcode: null, name: '', brand: '', category: 'Other', size: '', image_url: null, source: 'manual' }
+// The barcode decoder is the heaviest part of the app; load it only on the Scan tab.
+const Scanner = lazy(() => import('./Scanner'))
+
+const EMPTY = {
+  barcode: null,
+  name: '',
+  brand: '',
+  category: 'Other',
+  size: '',
+  image_url: null,
+  custom_image_url: null,
+  source: 'manual',
+}
 
 export default function ScanFlow({ householdId, inv, onToast }) {
   // step: scan | checking | known | new
@@ -40,35 +53,53 @@ export default function ScanFlow({ householdId, inv, onToast }) {
       setQty(1)
       if (!locationId) setLocationId(lastLocation(inv.locations))
 
-      // 1) Already one of our products?
-      const { data: mine } = await supabase
-        .from('products')
-        .select('*')
-        .eq('household_id', householdId)
-        .eq('barcode', code)
-        .maybeSingle()
+      // 1) Already one of our products? Match every spelling of the code
+      //    (UPC-A vs EAN-13), first in memory, then in the database in case
+      //    the other phone added it moments ago.
+      const variants = barcodeVariants(code)
+      let mine = inv.products.find((p) => sameBarcode(p.barcode, code))
+      if (!mine) {
+        const { data, error: findErr } = await supabase
+          .from('products')
+          .select('*')
+          .eq('household_id', householdId)
+          .in('barcode', variants)
+          .limit(1)
+        if (findErr) console.warn('Saved-product lookup failed', findErr)
+        mine = data?.[0]
+      }
       if (mine) {
         setProduct(mine)
         setStep('known')
         return
       }
       // 2) Look it up online.
+      const canonical = normalizeBarcode(code)
       let hit = null
       try {
-        hit = await lookupBarcode(code)
+        hit = await lookupBarcode(canonical)
       } catch {
         hit = null
       }
       setFoundOnline(Boolean(hit))
       setDraft(
         hit
-          ? { ...EMPTY, ...hit, brand: hit.brand ?? '', size: hit.size ?? '', barcode: code }
-          : { ...EMPTY, barcode: code },
+          ? { ...EMPTY, ...hit, brand: hit.brand ?? '', size: hit.size ?? '', barcode: canonical }
+          : { ...EMPTY, barcode: canonical },
       )
       setStep('new')
     },
-    [householdId, inv.locations, locationId],
+    [householdId, inv.locations, inv.products, locationId],
   )
+
+  async function setKnownPhoto(url) {
+    const previous = product.custom_image_url
+    const { error } = await supabase.from('products').update({ custom_image_url: url }).eq('id', product.id)
+    if (error) return setError(error.message)
+    if (previous && previous !== url) deleteProductPhoto(previous)
+    setProduct({ ...product, custom_image_url: url })
+    onToast(url ? 'Photo saved' : 'Back to the default picture')
+  }
 
   function startManual() {
     setBarcode(null)
@@ -96,6 +127,7 @@ export default function ScanFlow({ householdId, inv, onToast }) {
           category: draft.category,
           size: draft.size?.trim() || null,
           image_url: draft.image_url || null,
+          ...(draft.custom_image_url ? { custom_image_url: draft.custom_image_url } : {}),
           source: draft.source || 'manual',
         })
         .select('*')
@@ -164,12 +196,22 @@ export default function ScanFlow({ householdId, inv, onToast }) {
     const stock = inv.items.filter((i) => i.product_id === product.id)
     return (
       <section className="stack">
-        <div className="card product-head">
-          <ProductThumb product={product} />
-          <div>
-            <h2>{product.name}</h2>
-            <p className="muted small">{[product.brand, product.size, product.category].filter(Boolean).join(' · ')}</p>
+        <div className="card stack">
+          <div className="product-head">
+            <ProductThumb product={product} />
+            <div>
+              <h2>{product.name}</h2>
+              <p className="muted small">
+                {[product.brand, product.size, product.category].filter(Boolean).join(' · ')}
+              </p>
+            </div>
           </div>
+          <PhotoButton
+            householdId={householdId}
+            hasPhoto={Boolean(product.custom_image_url)}
+            onUploaded={(url) => setKnownPhoto(url)}
+            onRemove={() => setKnownPhoto(null)}
+          />
         </div>
 
         {stock.length > 0 && (
@@ -210,6 +252,18 @@ export default function ScanFlow({ householdId, inv, onToast }) {
   // step === 'new'
   return (
     <form className="stack" onSubmit={saveNew}>
+      {draft.barcode && (
+        <LinkExisting
+          barcode={draft.barcode}
+          products={inv.products}
+          onLinked={(linked) => {
+            if (draft.custom_image_url) deleteProductPhoto(draft.custom_image_url)
+            setProduct(linked)
+            setStep('known')
+            onToast(`Saved this barcode on ${linked.name}`)
+          }}
+        />
+      )}
       <div className="card stack">
         <div className="row between">
           <h2>{draft.barcode ? 'New product' : 'Add by hand'}</h2>
@@ -234,6 +288,12 @@ export default function ScanFlow({ householdId, inv, onToast }) {
             />
           </label>
         </div>
+        <PhotoButton
+          householdId={householdId}
+          hasPhoto={Boolean(draft.custom_image_url)}
+          onUploaded={(url) => setDraft((d) => ({ ...d, custom_image_url: url }))}
+          onRemove={() => setDraft((d) => ({ ...d, custom_image_url: null }))}
+        />
         <div className="grid2">
           <label>
             Brand
@@ -270,7 +330,14 @@ export default function ScanFlow({ householdId, inv, onToast }) {
       <button className="primary" disabled={busy}>
         {busy ? 'Saving…' : 'Save'}
       </button>
-      <button type="button" className="ghost" onClick={reset}>
+      <button
+        type="button"
+        className="ghost"
+        onClick={() => {
+          if (draft.custom_image_url) deleteProductPhoto(draft.custom_image_url)
+          reset()
+        }}
+      >
         Cancel
       </button>
     </form>

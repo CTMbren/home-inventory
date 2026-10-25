@@ -118,6 +118,9 @@ p {
 .row.tight {
   gap: 4px;
 }
+.stack.tight {
+  gap: 4px;
+}
 .between {
   justify-content: space-between;
 }
@@ -369,6 +372,11 @@ summary + .item-row {
   color: var(--ink);
   font-weight: 400;
   text-align: left;
+}
+.item-main.pick {
+  padding: 6px 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
 }
 .item-text {
   display: flex;

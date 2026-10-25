@@ -59,7 +59,8 @@ create table if not exists public.products (
   brand        text,
   category     text not null default 'Other',
   image_url    text,
-  size         text,                         -- e.g. '500 ml', '12 pack'
+  custom_image_url text,                     -- our own photo; shown instead of image_url
+  size         text,                        -- e.g. '500 ml', '12 pack'
   source       text not null default 'manual', -- manual | openfoodfacts | openbeautyfacts | upcitemdb
   min_quantity int,                          -- for low-stock later (Phase 2)
   created_at   timestamptz not null default now(),
