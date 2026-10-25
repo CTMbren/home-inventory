@@ -77,3 +77,12 @@ supabase/
 
 ## Next up (Phase 2)
 Expiry dates and an “expiring soon” view, minimum quantities with a shopping list, history view with undo.
+
+## Updates
+
+### Phase 2a: barcode matching + product photos
+Run `supabase/migrations/002_barcodes_and_photos.sql` once in the Supabase SQL Editor **before** using photos. It adds the `custom_image_url` column, the `product-images` storage bucket and its policies, and stores 12-digit UPC-A codes in 13-digit EAN form.
+
+- Rescanning matches a saved product even if the code comes back as UPC-A, EAN-13 or with extra leading zeros.
+- When a scan isn't recognised, **Already have this? Pick it from your items** saves the scanned code on an existing product.
+- **Add photo / Change photo** on new products, the scan result and the item sheet. Your photo replaces the online image everywhere; **Use default** switches back.

@@ -6,12 +6,16 @@ const initials = (name = '') =>
     .map((w) => w[0].toUpperCase())
     .join('') || '?'
 
+// A photo we took ourselves always wins over the one found online.
+const thumbnailUrl = (product) => product?.custom_image_url || product?.image_url || null
+
 export default function ProductThumb({ product, size = 56 }) {
-  if (product?.image_url) {
+  const src = thumbnailUrl(product)
+  if (src) {
     return (
       <img
         className="thumb"
-        src={product.image_url}
+        src={src}
         alt=""
         width={size}
         height={size}

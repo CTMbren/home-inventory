@@ -5,10 +5,22 @@ import { logEvent } from '../useInventory'
 import LocationPicker from './LocationPicker'
 import Stepper from './Stepper'
 import ProductThumb from './ProductThumb'
+import PhotoButton from './PhotoButton'
+import { deleteProductPhoto } from '../photos'
 
-/** Bottom sheet to edit one item: count, location, product details, delete. */
+/** Bottom sheet to edit one item: count, location, product details, photo, delete. */
 export default function ItemSheet({ item, inv, onClose, onToast }) {
   const product = inv.productById[item.product_id]
+
+  // Photo changes save straight away so the new thumbnail shows everywhere at once.
+  async function setPhoto(url) {
+    const previous = product.custom_image_url
+    const { error } = await supabase.from('products').update({ custom_image_url: url }).eq('id', product.id)
+    if (error) return setError(error.message)
+    if (previous && previous !== url) deleteProductPhoto(previous)
+    await inv.reload()
+    onToast(url ? 'Photo saved' : 'Back to the default picture')
+  }
   const [qty, setQty] = useState(item.quantity)
   const [locationId, setLocationId] = useState(item.location_id)
   const [name, setName] = useState(product?.name ?? '')
@@ -95,6 +107,12 @@ export default function ItemSheet({ item, inv, onClose, onToast }) {
             ✕
           </button>
         </div>
+        <PhotoButton
+          householdId={item.household_id}
+          hasPhoto={Boolean(product.custom_image_url)}
+          onUploaded={setPhoto}
+          onRemove={() => setPhoto(null)}
+        />
 
         <div className="row between">
           <span>Quantity</span>
